@@ -1,0 +1,6 @@
+# Binários e artefatos gerados
+*.elf
+*.o
+*.map
+*.tar.gz
+*.zip
