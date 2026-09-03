@@ -4,3 +4,17 @@
 *.map
 *.tar.gz
 *.zip
+
+# Arquivos temporários e de compilação do LaTeX
+*.aux
+*.log
+*.bbl
+*.blg
+*.out
+*.toc
+*.nav
+*.snm
+*.vrb
+*.synctex.gz
+*.fdb_latexmk
+*.fls

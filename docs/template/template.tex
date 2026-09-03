@@ -1,0 +1,112 @@
+\documentclass[12pt]{article}
+
+\usepackage{sbc-template}
+\usepackage{graphicx,url}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+
+\sloppy
+
+% -------------------------------------------------------------
+% METADADOS DO DOCUMENTO
+% -------------------------------------------------------------
+\title{Título do Relatório: Tema da Atividade\\
+\large Subtítulo ou Escopo das Tarefas Realizadas}
+
+\author{João Pedro Sant Ana de Carvalho}
+
+\address{Faculdade de Computação -- Universidade Federal de Mato Grosso do Sul (UFMS)\\
+  Campo Grande -- MS -- Brasil
+  \email{santc.joao@gmail.com}
+}
+
+\begin{document}
+
+\maketitle
+
+% -------------------------------------------------------------
+% RESUMO E ABSTRACT
+% -------------------------------------------------------------
+\begin{abstract}
+Brief summary in English (100-150 words) covering the objectives, main implementations, and verification results of the practical activities.
+\end{abstract}
+
+\begin{resumo}
+Breve resumo em português (100-150 palavras) apresentando o objetivo do trabalho, as atividades implementadas, as ferramentas utilizadas e os principais resultados obtidos.
+\end{resumo}
+
+% -------------------------------------------------------------
+% 1. INTRODUÇÃO
+% -------------------------------------------------------------
+\section{Introdução}
+
+Apresentar o contexto da atividade prática, os conceitos abordados e os objetivos principais do trabalho. Declarar com clareza o escopo das tarefas que foram desenvolvidas e testadas.
+
+% -------------------------------------------------------------
+% 2. IMPLEMENTAÇÃO DAS ATIVIDADES
+% -------------------------------------------------------------
+\section{Implementação das Atividades}
+
+\subsection{Tarefa 01: [Nome da Tarefa]}
+
+Descrever como a tarefa foi implementada, citando os arquivos modificados ou criados, funções principais, estruturas de dados e decisões de projeto.
+
+Exemplo de bloco de código:
+\begin{verbatim}
+void exemplo(void) {
+    // Código relevante aqui
+}
+\end{verbatim}
+
+\subsection{Tarefa 02: [Nome da Tarefa]}
+
+Descrever a próxima tarefa ou módulo implementado.
+
+% -------------------------------------------------------------
+% 3. ATIVIDADES NÃO REALIZADAS (OPCIONAL)
+% -------------------------------------------------------------
+% Caso alguma atividade prevista não tenha sido realizada, detalhe-a aqui:
+% \section{Atividades Pendentes}
+% \begin{itemize}
+%     \item \textbf{Tarefa X}: Justificativa ou escopo não implementado.
+% \end{itemize}
+
+% -------------------------------------------------------------
+% 4. RESULTADOS E VALIDAÇÃO
+% -------------------------------------------------------------
+\section{Resultados e Validação}
+
+Apresentar como os testes foram realizados (comandos de compilação, execução no QEMU, scripts de verificação) e os resultados observados:
+\begin{enumerate}
+    \item \textbf{Cenário de Teste 1:} Descrição do teste e saída observada no terminal.
+\begin{verbatim}
+Saída do console / terminal aqui
+\end{verbatim}
+    \item \textbf{Cenário de Teste 2:} Validação de funcionalidade.
+\end{enumerate}
+
+% -------------------------------------------------------------
+% 5. CONCLUSÃO
+% -------------------------------------------------------------
+\section{Conclusão}
+
+Síntese objetiva do que foi alcançado, dificuldades encontradas e próximos passos no desenvolvimento do sistema.
+
+% -------------------------------------------------------------
+% REFERÊNCIAS BIBLIOGRÁFICAS
+% -------------------------------------------------------------
+% Opção 1: Referências manuais (simples e diretas)
+\begin{thebibliography}{9}
+\bibitem{nuta2023}
+Nuta, S. (2023). \textit{Operating System in 1,000 Lines}.
+
+\bibitem{sbispec}
+RISC-V SBI Task Group (2022). \textit{RISC-V Supervisor Binary Interface Specification}.
+\end{thebibliography}
+
+% Opção 2: Usar BibTeX (descomente se preferir utilizar o arquivo sbc.bib):
+% \bibliographystyle{sbc}
+% \bibliography{sbc}
+
+\end{document}
+
