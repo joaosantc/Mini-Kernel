@@ -3,6 +3,7 @@
 *.o
 *.map
 *.tar.gz
+*.tar
 *.zip
 
 # Arquivos temporários e de compilação do LaTeX
