@@ -7,95 +7,186 @@
 
 \sloppy
 
-% -------------------------------------------------------------
-% METADADOS DO DOCUMENTO
-% -------------------------------------------------------------
-\title{Título do Relatório: Tema da Atividade\\
-\large Subtítulo ou Escopo das Tarefas Realizadas}
+\title{Relatório Prático: Kernel em RISC-V\\
+\large Alocação de Memória Física e Multiprocessamento Cooperativo}
 
-\author{João Pedro Sant Ana de Carvalho}
+\author{João Pedro Sant' Ana de Carvalho}
 
 \address{Faculdade de Computação -- Universidade Federal de Mato Grosso do Sul (UFMS)\\
   Campo Grande -- MS -- Brasil
-  \email{santc.joao@gmail.com}
+  \email{joao.sant@ufms.br}
 }
 
 \begin{document}
 
 \maketitle
 
-% -------------------------------------------------------------
-% RESUMO E ABSTRACT
-% -------------------------------------------------------------
 \begin{abstract}
-Brief summary in English (100-150 words) covering the objectives, main implementations, and verification results of the practical activities.
+This report documents the continuation of the minimal 32-bit RISC-V operating system kernel, focusing on physical memory management and multitasking support. The implemented tasks include dynamic page allocation via a bump allocator with linker-defined memory bounds (Task 6), and process management featuring process control blocks, stack isolation, context switching in assembly, cooperative scheduling, and trap stack protection via the sscratch register (Task 7). System operations were validated through compilation on Clang and execution on the QEMU emulator.
 \end{abstract}
 
 \begin{resumo}
-Breve resumo em português (100-150 palavras) apresentando o objetivo do trabalho, as atividades implementadas, as ferramentas utilizadas e os principais resultados obtidos.
+Este relatório descreve a evolução de um kernel mínimo para a arquitetura RISC-V de 32 bits, com foco no gerenciamento de memória física e no suporte a múltiplos fluxos de execução. Foram implementados o alocador dinâmico de páginas com delimitação de memória livre via linker script (Trabalho 06), além da infraestrutura completa de processos: blocos de controle de processos (PCB), pilhas privativas, troca de contexto em assembly com preservação de registradores callee-saved, escalonamento cooperativo e proteção da pilha de interrupção com o registrador sscratch (Trabalho 07). As implementações foram validadas no emulador QEMU.
 \end{resumo}
 
-% -------------------------------------------------------------
-% 1. INTRODUÇÃO
-% -------------------------------------------------------------
 \section{Introdução}
 
-Apresentar o contexto da atividade prática, os conceitos abordados e os objetivos principais do trabalho. Declarar com clareza o escopo das tarefas que foram desenvolvidas e testadas.
+Após o estabelecimento do boot em modo \textit{bare-metal}, da saída serial via chamadas OpenSBI e do suporte a exceções da CPU, o desenvolvimento do sistema avançou para dois pilares centrais de um sistema operacional: o gerenciamento de memória e a capacidade de multiprogramação.
 
-% -------------------------------------------------------------
-% 2. IMPLEMENTAÇÃO DAS ATIVIDADES
-% -------------------------------------------------------------
-\section{Implementação das Atividades}
+Este relatório abrange as atividades concluídas e testadas correspondentes à segunda etapa prática da disciplina:
+\begin{itemize}
+    \item \textbf{Trabalho 06}: Alocação de memória física alinhada a páginas de 4~KB;
+    \item \textbf{Trabalho 07}: Estrutura de processos, troca de contexto e escalonamento cooperativo.
+\end{itemize}
 
-\subsection{Tarefa 01: [Nome da Tarefa]}
+As tarefas subsequentes previstas para o ciclo da Entrega 2 (\textbf{Trabalhos 08 a 10}), que englobam paginação virtual, isolamento em modo de usuário e chamadas de sistema, \textbf{não foram realizadas} nesta etapa e permanecem como trabalho futuro.
 
-Descrever como a tarefa foi implementada, citando os arquivos modificados ou criados, funções principais, estruturas de dados e decisões de projeto.
+\section{Atividades Realizadas}
 
-Exemplo de bloco de código:
+\subsection{Trabalho 06: Alocação de Memória Física}
+
+Para permitir a criação dinâmica de estruturas pelo kernel sem recorrer à alocação estática arbitrária, foi implementado um alocador de páginas físicas baseado na estratégia \textit{Bump Allocator} (ou alocador linear).
+
+A delimitação da memória disponível foi realizada diretamente no linker script (\texttt{kernel.ld}), logo após o espaço reservado para a pilha do kernel (\texttt{\_\_stack\_top}). A área foi alinhada a uma fronteira de 4096 bytes (4~KB) e estendida em 64~MB, demarcada pelos símbolos \texttt{\_\_free\_ram} e \texttt{\_\_free\_ram\_end}:
+
 \begin{verbatim}
-void exemplo(void) {
-    // Código relevante aqui
+    . = ALIGN(4096);
+    __free_ram = .;
+    . += 64 * 1024 * 1024;
+    __free_ram_end = .;
+\end{verbatim}
+
+No arquivo \texttt{common.h}, foi definida a constante fundamental \texttt{PAGE\_SIZE} como 4096. A função \texttt{alloc\_pages} no arquivo \texttt{kernel.c} gerencia a alocação de $n$ páginas consecutivas. A variável estática \texttt{next\_paddr} mantém o endereço da próxima região livre. A inicialização é resolvida dinamicamente no primeiro ciclo para garantir estrita conformidade com expressões constantes em C:
+
+\begin{verbatim}
+paddr_t alloc_pages(uint32_t n) {
+  static paddr_t next_paddr = 0;
+  if (!next_paddr)
+    next_paddr = (paddr_t)__free_ram;
+
+  paddr_t paddr = next_paddr;
+  next_paddr += n * PAGE_SIZE;
+
+  if (next_paddr > (paddr_t)__free_ram_end)
+    PANIC("out of memory");
+
+  memset((void *)paddr, 0, n * PAGE_SIZE);
+  return paddr;
 }
 \end{verbatim}
 
-\subsection{Tarefa 02: [Nome da Tarefa]}
-
-Descrever a próxima tarefa ou módulo implementado.
-
-% -------------------------------------------------------------
-% 3. ATIVIDADES NÃO REALIZADAS (OPCIONAL)
-% -------------------------------------------------------------
-% Caso alguma atividade prevista não tenha sido realizada, detalhe-a aqui:
-% \section{Atividades Pendentes}
-% \begin{itemize}
-%     \item \textbf{Tarefa X}: Justificativa ou escopo não implementado.
-% \end{itemize}
-
-% -------------------------------------------------------------
-% 4. RESULTADOS E VALIDAÇÃO
-% -------------------------------------------------------------
-\section{Resultados e Validação}
-
-Apresentar como os testes foram realizados (comandos de compilação, execução no QEMU, scripts de verificação) e os resultados observados:
+A função assegura três invariantes:
 \begin{enumerate}
-    \item \textbf{Cenário de Teste 1:} Descrição do teste e saída observada no terminal.
-\begin{verbatim}
-Saída do console / terminal aqui
-\end{verbatim}
-    \item \textbf{Cenário de Teste 2:} Validação de funcionalidade.
+    \item Os endereços retornados são múltiplos exatos de 4~KB;
+    \item Em caso de esgotamento do limite superior (\texttt{\_\_free\_ram\_end}), dispara-se \texttt{PANIC("out of memory")};
+    \item A memória retornada é integralmente limpa com zeros via \texttt{memset}, evitando a propagação de lixo de memória.
 \end{enumerate}
 
-% -------------------------------------------------------------
-% 5. CONCLUSÃO
-% -------------------------------------------------------------
+\subsection{Trabalho 07: Processos e Troca de Contexto}
+
+O sétimo trabalho viabilizou a execução concorrente de tarefas no kernel. No arquivo \texttt{kernel.h}, foi definido o Bloco de Controle de Processo (\texttt{struct process}) e a capacidade máxima de processos no sistema (\texttt{PROCS\_MAX = 8}):
+
+\begin{verbatim}
+#define PROCS_MAX 8
+#define PROC_UNUSED   0
+#define PROC_RUNNABLE 1
+
+struct process {
+  int pid;
+  int state;
+  vaddr_t sp;
+  uint8_t stack[8192];
+};
+\end{verbatim}
+
+Cada processo possui sua própria pilha de execução com 8~KB de extensão, eliminando a dependência de pilha única global.
+
+A rotina de troca de contexto (\texttt{switch\_context}) foi implementada em assembly com o atributo \texttt{naked}. Seguindo a convenção de chamada da ABI RISC-V, apenas os 13 registradores \textit{callee-saved} (\texttt{ra} e \texttt{s0} a \texttt{s11}) necessitam de salvamento na pilha da tarefa corrente, uma vez que os registradores temporários (\textit{caller-saved}) já são geridos pelo compilador no momento da invocação:
+
+\begin{verbatim}
+__attribute__((naked)) void switch_context(uint32_t *prev_sp,
+                                           uint32_t *next_sp) {
+  __asm__ __volatile__(
+      "addi sp, sp, -13 * 4\n"
+      "sw ra,  0  * 4(sp)\n"
+      "sw s0,  1  * 4(sp)\n"
+      "sw s1,  2  * 4(sp)\n"
+      "sw s2,  3  * 4(sp)\n"
+      "sw s3,  4  * 4(sp)\n"
+      "sw s4,  5  * 4(sp)\n"
+      "sw s5,  6  * 4(sp)\n"
+      "sw s6,  7  * 4(sp)\n"
+      "sw s7,  8  * 4(sp)\n"
+      "sw s8,  9  * 4(sp)\n"
+      "sw s9,  10 * 4(sp)\n"
+      "sw s10, 11 * 4(sp)\n"
+      "sw s11, 12 * 4(sp)\n"
+      "sw sp, (a0)\n"
+      "lw sp, (a1)\n"
+      "lw ra,  0  * 4(sp)\n"
+      "lw s0,  1  * 4(sp)\n"
+      "lw s1,  2  * 4(sp)\n"
+      "lw s2,  3  * 4(sp)\n"
+      "lw s3,  4  * 4(sp)\n"
+      "lw s4,  5  * 4(sp)\n"
+      "lw s5,  6  * 4(sp)\n"
+      "lw s6,  7  * 4(sp)\n"
+      "lw s7,  8  * 4(sp)\n"
+      "lw s8,  9  * 4(sp)\n"
+      "lw s9,  10 * 4(sp)\n"
+      "lw s10, 11 * 4(sp)\n"
+      "lw s11, 12 * 4(sp)\n"
+      "addi sp, sp, 13 * 4\n"
+      "ret\n");
+}
+\end{verbatim}
+
+A função \texttt{create\_process} aloca um descritor livre na tabela estática \texttt{procs}, monta a estrutura inicial da pilha empilhando zeros para os registradores salvos e o endereço de entrada no registrador \texttt{ra}, ajustando o estado para \texttt{PROC\_RUNNABLE}.
+
+O escalonador cooperativo (\texttt{yield}) realiza a busca circular em rodízio pelo próximo processo executável com \texttt{pid > 0}. Caso nenhum outro processo esteja pronto, o \texttt{idle\_proc} (PID 0) é selecionado. Durante a transição, a base da pilha do próximo processo é gravada no registrador CSR \texttt{sscratch}:
+
+\begin{verbatim}
+  __asm__ __volatile__(
+      "csrw sscratch, %[sscratch]\n"
+      : : [sscratch] "r"((uint32_t)&next->stack[sizeof(next->stack)]));
+\end{verbatim}
+
+Essa medida permitiu atualizar a rotina \texttt{kernel\_entry} com a instrução atômica \texttt{csrrw sp, sscratch, sp}, garantindo que qualquer armadilha da CPU recupere com segurança a pilha privativa do processo em execução.
+
+\section{Atividades Não Realizadas}
+
+Mantendo a precisão sobre o escopo entregue, relata-se as tarefas pendentes do segundo bloco:
+
+\begin{itemize}
+    \item \textbf{Trabalho 08 (Paginação e Memória Virtual):} A configuração das tabelas de páginas Sv32, o mapeamento de páginas no registrador \texttt{satp} e o tratamento de falhas de página (\textit{page faults}) não foram implementados nesta entrega.
+    \item \textbf{Trabalhos 09 e 10 (Modo Usuário e Syscalls):} A transição formal para o nível de privilégio U-Mode e a interface de chamadas de sistema (\texttt{ecall}) permanecem pendentes para as próximas iterações.
+\end{itemize}
+
+\section{Resultados e Validação}
+
+O código foi compilado através do Clang/LLD com as opções \texttt{-ffreestanding -nostdlib -O2} e verificado no QEMU (\texttt{run.sh}).
+
+\begin{enumerate}
+    \item \textbf{Validação da Alocação de Páginas:} A inspeção dos símbolos via \texttt{llvm-nm} confirmou que \texttt{\_\_free\_ram} foi alocado em \texttt{0x80231000} e \texttt{\_\_free\_ram\_end} em \texttt{0x84231000}, respeitando o alinhamento de 4~KB e a extensão de 64~MB. A chamada de teste em \texttt{kernel\_main} gerou a saída serial esperada:
+\begin{verbatim}
+alloc_pages test: paddr0=80231000
+alloc_pages test: paddr1=80233000
+\end{verbatim}
+    O endereço \texttt{paddr0} coincide com a base da memória livre, e \texttt{paddr1} situa-se exatamente 8192 bytes (2 páginas) à frente, confirmando a ausência de sobreposição.
+
+    \item \textbf{Validação da Troca de Contexto e Escalonamento:} Foram criados dois processos concorrentes (\texttt{proc\_a} e \texttt{proc\_b}) que emitem repetidamente os caracteres \texttt{'A'} e \texttt{'B'}, cedendo a CPU voluntariamente via \texttt{yield}:
+\begin{verbatim}
+starting process A
+Astarting process B
+BABABABABABABABABABABABABABABABABABABABABABABABABABABABA...
+\end{verbatim}
+    A saída confirma que a alternância de fluxo ocorre de forma contínua e determinística, preservando o estado interno dos registradores e os ponteiros de pilha individuais de cada tarefa.
+\end{enumerate}
+
 \section{Conclusão}
 
-Síntese objetiva do que foi alcançado, dificuldades encontradas e próximos passos no desenvolvimento do sistema.
+As atividades desenvolvidas permitiram que o sistema evoluísse de um núcleo estático para um ambiente com alocação dinâmica de páginas físicas e capacidade de multiprogramação cooperativa com pilhas segregadas e proteção de registradores. As pendências relativas à memória virtual paginada e à segregação de privilégios com modo usuário delineiam os próximos passos para a consolidação do sistema operacional.
 
-% -------------------------------------------------------------
-% REFERÊNCIAS BIBLIOGRÁFICAS
-% -------------------------------------------------------------
-% Opção 1: Referências manuais (simples e diretas)
 \begin{thebibliography}{9}
 \bibitem{nuta2023}
 Nuta, S. (2023). \textit{Operating System in 1,000 Lines}.
@@ -104,9 +195,4 @@ Nuta, S. (2023). \textit{Operating System in 1,000 Lines}.
 RISC-V SBI Task Group (2022). \textit{RISC-V Supervisor Binary Interface Specification}.
 \end{thebibliography}
 
-% Opção 2: Usar BibTeX (descomente se preferir utilizar o arquivo sbc.bib):
-% \bibliographystyle{sbc}
-% \bibliography{sbc}
-
 \end{document}
-
