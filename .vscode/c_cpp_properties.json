@@ -1,0 +1,20 @@
+{
+  "configurations": [
+    {
+      "name": "RISC-V 32",
+      "includePath": [
+        "${workspaceFolder}/**"
+      ],
+      "compilerPath": "/usr/bin/clang",
+      "compilerArgs": [
+        "--target=riscv32-unknown-elf",
+        "-ffreestanding",
+        "-nostdlib"
+      ],
+      "cStandard": "c11",
+      "compileCommands": "${workspaceFolder}/compile_commands.json"
+    }
+  ],
+  "version": 4
+}
+
