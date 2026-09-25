@@ -1,17 +1,16 @@
 #pragma once
 #include "common.h"
 
-struct sbiret {
-  long error;
-  long value;
-};
-
 #define SATP_SV32 (1u << 31)
 #define PAGE_V (1 << 0)
 #define PAGE_R (1 << 1)
 #define PAGE_W (1 << 2)
 #define PAGE_X (1 << 3)
 #define PAGE_U (1 << 4)
+
+#define SSTATUS_SPIE (1 << 5)
+
+#define USER_BASE 0x1000000
 
 #define PROCS_MAX 8
 #define PROC_UNUSED 0
@@ -79,8 +78,11 @@ struct trap_frame {
     }                                                                          \
   } while (0)
 
+extern char _binary_shell_bin_start[];
+extern char _binary_shell_bin_size[];
+
 paddr_t alloc_pages(uint32_t n);
 void map_page(uint32_t *table1, uint32_t vaddr, paddr_t paddr, uint32_t flags);
-struct process *create_process(uint32_t pc);
+struct process *create_process(const void *image, size_t image_size);
 void switch_context(uint32_t *prev_sp, uint32_t *next_sp);
 void yield(void);
