@@ -1,3 +1,6 @@
+# Diretório de build out-of-tree
+build/
+
 # Binários e artefatos gerados
 *.elf
 *.bin
