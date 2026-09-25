@@ -3,18 +3,23 @@
     {
       "name": "RISC-V 32",
       "includePath": [
-        "${workspaceFolder}/**"
+        "${workspaceFolder}/**",
+        "${workspaceFolder}/kernel",
+        "${workspaceFolder}/user",
+        "${workspaceFolder}/common"
       ],
       "compilerPath": "/usr/bin/clang",
       "compilerArgs": [
         "--target=riscv32-unknown-elf",
         "-ffreestanding",
-        "-nostdlib"
+        "-nostdlib",
+        "-Ikernel",
+        "-Iuser",
+        "-Icommon"
       ],
       "cStandard": "c11",
-      "compileCommands": "${workspaceFolder}/compile_commands.json"
+      "compileCommands": "${workspaceFolder}/.vscode/compile_commands.json"
     }
   ],
   "version": 4
 }
-
