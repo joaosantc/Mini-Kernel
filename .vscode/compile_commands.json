@@ -1,8 +1,8 @@
 [
   {
     "directory": "/home/joao/repos/college/SO",
-    "command": "/usr/bin/clang -std=c11 -O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib -Ikernel -Iuser -Icommon -c kernel/main.c",
-    "file": "kernel/main.c"
+    "command": "/usr/bin/clang -std=c11 -O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib -Ikernel -Iuser -Icommon -c kernel/kernel.c",
+    "file": "kernel/kernel.c"
   },
   {
     "directory": "/home/joao/repos/college/SO",
@@ -11,12 +11,12 @@
   },
   {
     "directory": "/home/joao/repos/college/SO",
-    "command": "/usr/bin/clang -std=c11 -O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib -Ikernel -Iuser -Icommon -c user/lib.c",
-    "file": "user/lib.c"
+    "command": "/usr/bin/clang -std=c11 -O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib -Ikernel -Iuser -Icommon -c user/user.c",
+    "file": "user/user.c"
   },
   {
     "directory": "/home/joao/repos/college/SO",
-    "command": "/usr/bin/clang -std=c11 -O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib -Ikernel -Iuser -Icommon -c user/apps/shell.c",
-    "file": "user/apps/shell.c"
+    "command": "/usr/bin/clang -std=c11 -O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib -Ikernel -Iuser -Icommon -c user/shell.c",
+    "file": "user/shell.c"
   }
 ]

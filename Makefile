@@ -20,20 +20,46 @@ USER_APP_ELF := $(BUILD_DIR)/user/shell.elf
 USER_APP_BIN := $(BUILD_DIR)/user/shell.bin
 USER_APP_OBJ := $(BUILD_DIR)/user/shell.bin.o
 KERNEL_ELF   := $(BUILD_DIR)/kernel.elf
-DIST_PACKAGE := $(BUILD_DIR)/dist/kernel.tar.gz
+DIST_DIR     := $(BUILD_DIR)/dist
+DIST_STAGE   := $(DIST_DIR)/stage
+DIST_TAR_GZ  := $(DIST_DIR)/kernel.tar.gz
 
-.PHONY: all run clean dist report help
+# Template do script run.sh para o ambiente de submissão plano
+define RUN_SH_TEMPLATE
+#!/bin/bash
+set -xue
+
+QEMU=qemu-system-riscv32
+OBJCOPY=llvm-objcopy
+
+CC=clang
+CFLAGS="-std=c11 -O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib"
+
+# Build the shell (application)
+$$CC $$CFLAGS -Wl,-Tuser.ld -Wl,-Map=shell.map -o shell.elf shell.c user.c common.c
+$$OBJCOPY --set-section-flags .bss=alloc,contents -O binary shell.elf shell.bin
+$$OBJCOPY -Ibinary -Oelf32-littleriscv shell.bin shell.bin.o
+
+# Build the kernel
+$$CC $$CFLAGS -Wl,-Tkernel.ld -Wl,-Map=kernel.map -o kernel.elf kernel.c common.c shell.bin.o
+
+$$QEMU -machine virt -bios default -nographic -serial mon:stdio --no-reboot -kernel kernel.elf
+endef
+
+export RUN_SH_TEMPLATE
+
+.PHONY: all run clean dist help
 
 all: $(KERNEL_ELF)
 
 # Diretórios de build
-$(BUILD_DIR)/kernel $(BUILD_DIR)/user $(BUILD_DIR)/dist:
+$(BUILD_DIR)/kernel $(BUILD_DIR)/user $(DIST_DIR):
 	@mkdir -p $@
 
 # 1. Compilação da aplicação de usuário
-$(USER_APP_ELF): $(USER_DIR)/apps/shell.c $(USER_DIR)/lib.c $(COMMON_DIR)/common.c $(USER_DIR)/linker.ld | $(BUILD_DIR)/user
-	$(CC) $(CFLAGS) -Wl,-T$(USER_DIR)/linker.ld -Wl,-Map=$(BUILD_DIR)/user/shell.map -o $@ \
-		$(USER_DIR)/apps/shell.c $(USER_DIR)/lib.c $(COMMON_DIR)/common.c
+$(USER_APP_ELF): $(USER_DIR)/shell.c $(USER_DIR)/user.c $(COMMON_DIR)/common.c $(USER_DIR)/user.ld | $(BUILD_DIR)/user
+	$(CC) $(CFLAGS) -Wl,-T$(USER_DIR)/user.ld -Wl,-Map=$(BUILD_DIR)/user/shell.map -o $@ \
+		$(USER_DIR)/shell.c $(USER_DIR)/user.c $(COMMON_DIR)/common.c
 
 # 2. Conversão para binário cru
 $(USER_APP_BIN): $(USER_APP_ELF)
@@ -44,9 +70,9 @@ $(USER_APP_OBJ): $(USER_APP_BIN)
 	(cd $(BUILD_DIR)/user && $(OBJCOPY) -Ibinary -Oelf32-littleriscv shell.bin shell.bin.o)
 
 # 4. Compilação e linkagem do kernel
-$(KERNEL_ELF): $(KERNEL_DIR)/main.c $(COMMON_DIR)/common.c $(KERNEL_DIR)/linker.ld $(USER_APP_OBJ) | $(BUILD_DIR)/kernel
-	$(CC) $(CFLAGS) -Wl,-T$(KERNEL_DIR)/linker.ld -Wl,-Map=$(BUILD_DIR)/kernel/kernel.map -o $@ \
-		$(KERNEL_DIR)/main.c $(COMMON_DIR)/common.c $(USER_APP_OBJ)
+$(KERNEL_ELF): $(KERNEL_DIR)/kernel.c $(COMMON_DIR)/common.c $(KERNEL_DIR)/kernel.ld $(USER_APP_OBJ) | $(BUILD_DIR)/kernel
+	$(CC) $(CFLAGS) -Wl,-T$(KERNEL_DIR)/kernel.ld -Wl,-Map=$(BUILD_DIR)/kernel/kernel.map -o $@ \
+		$(KERNEL_DIR)/kernel.c $(COMMON_DIR)/common.c $(USER_APP_OBJ)
 
 # Execução no QEMU
 run: $(KERNEL_ELF)
@@ -57,36 +83,28 @@ clean:
 	rm -rf $(BUILD_DIR) *.elf *.bin *.o *.map *.tar *.tar.gz
 	@rm -f docs/relatorios/*/*.aux docs/relatorios/*/*.log docs/relatorios/*/*.bbl docs/relatorios/*/*.blg docs/relatorios/*/*.out docs/relatorios/*/*.toc
 
-# Pacote para submissão
-dist: $(KERNEL_ELF) | $(BUILD_DIR)/dist
-	tar -czf $(DIST_PACKAGE) \
-		kernel/main.c kernel/kernel.h kernel/linker.ld \
-		user/lib.c user/user.h user/linker.ld user/apps/shell.c \
-		common/common.c common/common.h \
-		Makefile run.sh \
-		$(KERNEL_ELF)
-	@echo "==> Pacote de submissão gerado: $(DIST_PACKAGE)"
-
-# Compilação de relatórios (ex: make report REPORT=r2)
-REPORT ?= r2
-report:
-	@if [ ! -f "docs/relatorios/$(REPORT)/main.tex" ]; then \
-		echo "Erro: docs/relatorios/$(REPORT)/main.tex não encontrado."; \
-		exit 1; \
-	fi
-	@echo "==> Compilando relatório $(REPORT)..."
-	@cd docs/relatorios/$(REPORT) && \
-		TEXINPUTS=.:../../template: pdflatex -interaction=nonstopmode main.tex > /dev/null && \
-		(bibtex main > /dev/null 2>&1 || true) && \
-		TEXINPUTS=.:../../template: pdflatex -interaction=nonstopmode main.tex > /dev/null && \
-		TEXINPUTS=.:../../template: pdflatex -interaction=nonstopmode main.tex > /dev/null && \
-		cp main.pdf $(REPORT).pdf
-	@echo "==> Concluído: docs/relatorios/$(REPORT)/$(REPORT).pdf gerado."
+# Pacote para submissão (.tar.gz com layout plano)
+dist: $(KERNEL_ELF) | $(DIST_DIR)
+	@rm -rf $(DIST_STAGE)
+	@mkdir -p $(DIST_STAGE)
+	@cp $(KERNEL_DIR)/kernel.* $(DIST_STAGE)/
+	@cp $(USER_DIR)/user.* $(USER_DIR)/shell.c $(DIST_STAGE)/
+	@cp $(COMMON_DIR)/common.* $(DIST_STAGE)/
+	@cp $(KERNEL_ELF) $(DIST_STAGE)/
+	@cp $(USER_APP_OBJ) $(USER_APP_BIN) $(USER_APP_ELF) $(DIST_STAGE)/
+	@printf '%s\n' "$$RUN_SH_TEMPLATE" > $(DIST_STAGE)/run.sh
+	@chmod +x $(DIST_STAGE)/run.sh
+	@tar -czf $(DIST_TAR_GZ) -C $(DIST_STAGE) \
+		common.c common.h kernel.c kernel.h kernel.ld \
+		run.sh shell.c user.c user.h user.ld kernel.elf \
+		shell.bin.o shell.bin shell.elf
+	@cp $(DIST_TAR_GZ) ./kernel.tar.gz
+	@rm -rf $(DIST_STAGE)
+	@echo "==> Pacote de submissão gerado: $(DIST_TAR_GZ) e ./kernel.tar.gz"
 
 help:
 	@echo "Alvos disponíveis:"
 	@echo "  make              - Compila kernel e aplicação (gera build/kernel.elf)"
 	@echo "  make run          - Compila e executa no QEMU"
 	@echo "  make clean        - Remove diretório build/ e arquivos temporários"
-	@echo "  make dist         - Gera o pacote .tar.gz de submissão em build/dist/"
-	@echo "  make report       - Compila o relatório especificado (ex: make report REPORT=r2)"
+	@echo "  make dist         - Gera exclusivamente o pacote .tar.gz de submissão"

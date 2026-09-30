@@ -23,7 +23,7 @@ struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4,
   return (struct sbiret){.error = a0, .value = a1};
 }
 
-void putchar(char ch) { sbi_call(ch, 0, 0, 0, 0, 0, 0, 1); }
+__attribute__((weak)) void putchar(char ch) { sbi_call(ch, 0, 0, 0, 0, 0, 0, 1); }
 
 paddr_t alloc_pages(uint32_t n) {
   static paddr_t next_paddr = 0;
@@ -286,11 +286,13 @@ void kernel_main(void) {
   idle_proc->pid = 0;
   current_proc = idle_proc;
 
-  uint8_t *shell_bin = (uint8_t *)_binary_shell_bin_start;
-  printf("shell_bin size = %d\n", (int)_binary_shell_bin_size);
-  printf("shell_bin[0] = %x\n", shell_bin[0]);
+  if (_binary_shell_bin_start && (size_t)_binary_shell_bin_size > 0) {
+    uint8_t *shell_bin = (uint8_t *)_binary_shell_bin_start;
+    printf("shell_bin size = %d\n", (int)_binary_shell_bin_size);
+    printf("shell_bin[0] = %x\n", shell_bin[0]);
 
-  create_process(_binary_shell_bin_start, (size_t)_binary_shell_bin_size);
+    create_process(_binary_shell_bin_start, (size_t)_binary_shell_bin_size);
+  }
 
   yield();
   PANIC("switched to idle process");

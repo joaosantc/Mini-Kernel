@@ -2,7 +2,7 @@
 
 extern char __stack_top[];
 
-void putchar(char ch) {
+__attribute__((weak)) void putchar(char ch) {
   register long a0 __asm__("a0") = ch;
   __asm__ __volatile__("ecall" : "+r"(a0) :: "memory");
 }

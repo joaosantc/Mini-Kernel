@@ -78,8 +78,8 @@ struct trap_frame {
     }                                                                          \
   } while (0)
 
-extern char _binary_shell_bin_start[];
-extern char _binary_shell_bin_size[];
+__attribute__((weak)) extern char _binary_shell_bin_start[];
+__attribute__((weak)) extern char _binary_shell_bin_size[];
 
 paddr_t alloc_pages(uint32_t n);
 void map_page(uint32_t *table1, uint32_t vaddr, paddr_t paddr, uint32_t flags);
