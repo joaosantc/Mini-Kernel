@@ -72,7 +72,24 @@ void handle_trap(struct trap_frame *f) {
     return;
   }
 
-  PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval,
+  const char *desc = "unknown trap";
+  switch (scause) {
+    case 0:  desc = "instruction address misaligned"; break;
+    case 1:  desc = "instruction access fault"; break;
+    case 2:  desc = "illegal instruction"; break;
+    case 3:  desc = "breakpoint"; break;
+    case 4:  desc = "load address misaligned"; break;
+    case 5:  desc = "load access fault"; break;
+    case 6:  desc = "store/amo address misaligned"; break;
+    case 7:  desc = "store/amo access fault"; break;
+    case 12: desc = "instruction page fault"; break;
+    case 13: desc = "load page fault"; break;
+    case 15: desc = "store/amo page fault"; break;
+  }
+
+  printf("Trap: %s (scause=%x, stval=%x, sepc=%x)\n", desc, scause, stval,
+         user_pc);
+  PANIC("unexpected trap scause=%x, stval=%x, sepc=%x", scause, stval,
         user_pc);
 }
 

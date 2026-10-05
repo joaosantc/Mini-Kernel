@@ -8,7 +8,7 @@
 \sloppy
 
 \title{Relatório Prático: Kernel em RISC-V\\
-\large Alocação de Memória Física, Processos e Paginação Sv32}
+\large Alocação de Memória Física, Processos, Paginação Sv32, Aplicações e Modo Usuário}
 
 \author{João Pedro Sant' Ana de Carvalho}
 
@@ -22,25 +22,27 @@
 \maketitle
 
 \begin{abstract}
-This report documents the continuation of the minimal 32-bit RISC-V operating system kernel, focusing on physical memory management, multitasking support, and virtual memory paging. The completed tasks include dynamic page allocation via a bump allocator with linker-defined memory bounds (Task 6), process infrastructure featuring process control blocks, private stacks, context switching in assembly, cooperative scheduling, and trap stack protection via the sscratch register (Task 7), as well as two-level Sv32 page table management, kernel identity mapping, and MMU address translation via the satp register (Task 8). Tasks 9 (user mode isolation) and 10 (system calls) were not implemented in this version. The implementation was validated on the QEMU emulator.
+This report documents the continuation of the minimal 32-bit RISC-V operating system kernel, completing the full scope of the second project milestone. The accomplished tasks encompass physical memory management via a page-aligned bump allocator (Task 6), process infrastructure featuring dedicated process control blocks, private stacks, assembly context switching, cooperative round-robin scheduling, and kernel stack isolation using the sscratch register (Task 7), two-level Sv32 virtual memory management with identity mapping and MMU activation via the satp register (Task 8), userland application memory layout, minimal runtime library, object-based binary embedding, and application dispatch (Task 9), as well as CPU privilege transition to user mode (U-Mode) via sret, CSR configuration, user page permissions, hardware-enforced privilege isolation, and controlled trap exception diagnostics (Task 10). The entire system was validated on the QEMU emulator.
 \end{abstract}
 
 \begin{resumo}
-Este relatório descreve a evolução de um kernel mínimo para a arquitetura RISC-V de 32 bits, com foco no gerenciamento de memória física, no suporte a múltiplos fluxos de execução e na introdução da memória virtual. Foram implementados o alocador dinâmico de páginas com delimitação de memória livre via linker script (Trabalho 06), a infraestrutura de processos com blocos de controle (PCB), pilhas privativas, troca de contexto em assembly, escalonamento cooperativo e proteção da pilha de interrupção com o registrador sscratch (Trabalho 07), além das tabelas de páginas em dois níveis no modelo Sv32, mapeamento identidade da região do kernel e chaveamento da MMU via registrador satp com barreiras sfence.vma (Trabalho 08). Fica registrado que os Trabalhos 09 (modo usuário) e 10 (chamadas de sistema) não foram realizados nesta entrega. As implementações foram validadas no emulador QEMU.
+Este relatório descreve a evolução de um kernel mínimo para a arquitetura RISC-V de 32 bits, concluindo integralmente o escopo da segunda entrega prática. Foram implementados o alocador dinâmico de páginas de memória física alinhadas a 4~KB (Trabalho 06), a infraestrutura de processos com blocos de controle (PCB), pilhas privativas, troca de contexto em assembly, escalonamento cooperativo e proteção da pilha de interrupção com o registrador sscratch (Trabalho 07), o gerenciamento de memória virtual Sv32 em dois níveis com chaveamento de MMU via satp (Trabalho 08), o suporte à construção e embutimento de aplicações no espaço de usuário com runtime mínimo (Trabalho 09), e a transição de privilégio da CPU para o modo usuário (U-Mode) via instrução sret, configuração dos registradores CSR, isolamento de privilégio de instruções e memória por hardware, e diagnóstico controlado de exceções (Trabalho 10). Todas as implementações foram validadas no emulador QEMU.
 \end{resumo}
 
 \section{Introdução}
 
-Após o estabelecimento do boot em modo \textit{bare-metal}, da saída serial via chamadas OpenSBI e do suporte a exceções da CPU, o desenvolvimento do sistema avançou para os pilares essenciais de gerenciamento de memória e concorrência em um sistema operacional.
+Após o estabelecimento do boot em modo \textit{bare-metal}, da saída serial via chamadas OpenSBI e do suporte a exceções da CPU, o desenvolvimento do sistema avançou para os pilares essenciais de gerenciamento de memória, concorrência e execução de aplicações em um sistema operacional.
 
-Este relatório abrange as atividades concluídas e testadas correspondentes ao escopo da segunda entrega prática da disciplina:
+Este relatório abrange as atividades concluídas e testadas correspondentes ao escopo integral da segunda entrega prática da disciplina:
 \begin{itemize}
     \item \textbf{Trabalho 06}: Alocação de memória física alinhada a páginas de 4~KB;
     \item \textbf{Trabalho 07}: Estrutura de processos, troca de contexto e escalonamento cooperativo;
-    \item \textbf{Trabalho 08}: Tabelas de páginas Sv32 e gerenciamento de memória virtual.
+    \item \textbf{Trabalho 08}: Tabelas de páginas Sv32 e gerenciamento de memória virtual;
+    \item \textbf{Trabalho 09}: Aplicações de usuário, runtime inicial e embutimento de binários;
+    \item \textbf{Trabalho 10}: Transição para modo usuário (U-Mode), isolamento de privilégios e diagnóstico de exceções.
 \end{itemize}
 
-As tarefas subsequentes previstas para o ciclo da Entrega 2 (\textbf{Trabalhos 09 e 10}), que englobam a transição para o nível de privilégio de usuário e a interface de chamadas de sistema (\texttt{ecall}), \textbf{não foram realizadas} nesta etapa e permanecem como trabalho futuro.
+Com a conclusão deste ciclo, todas as metas da Entrega 2 foram alcançadas com sucesso.
 
 \section{Atividades Realizadas}
 
@@ -210,13 +212,173 @@ Durante a troca de processos em \texttt{yield}, a MMU é atualizada gravando-se 
         [sscratch] "r"((uint32_t)&next->stack[sizeof(next->stack)]));
 \end{verbatim}
 
+\subsection{Trabalho 09: Aplicações de Usuário e Embutimento de Binários}
+
+O nono trabalho estabeleceu o suporte à execução de código de usuário dissociado da imagem do kernel. O modelo adotado segrega fisicamente o espaço de endereçamento, provê uma biblioteca de runtime mínima para a aplicação e embute o binário resultante no executável do kernel através de encapsulamento ELF.
+
+\subsubsection{Layout de Memória e Linker Script da Aplicação}
+
+No arquivo \texttt{user.ld}, foi definido o layout de memória específico da aplicação em espaço de usuário, com endereço virtual base em \texttt{0x1000000} (\texttt{USER\_BASE}), garantindo o desacoplamento do espaço do kernel (\texttt{0x80200000}):
+
+\begin{verbatim}
+ENTRY(start)
+
+SECTIONS {
+    . = 0x1000000;
+
+    .text :{
+        KEEP(*(.text.start));
+        *(.text .text.*);
+    }
+
+    .rodata : ALIGN(4) {
+        *(.rodata .rodata.*);
+    }
+
+    .data : ALIGN(4) {
+        *(.data .data.*);
+    }
+
+    .bss : ALIGN(4) {
+        *(.bss .bss.* .sbss .sbss.*);
+
+        . = ALIGN(16);
+        . += 64 * 1024; /* 64KB */
+        __stack_top = .;
+
+        ASSERT(. < 0x1800000, "too large executable");
+    }
+}
+\end{verbatim}
+
+A seção \texttt{.text.start} fixa a rotina \texttt{start} no início do executável. O linker script aloca 64~KB para a pilha do processo (\texttt{\_\_stack\_top}) e aplica uma asserção estática impedindo que a imagem ultrapasse o limite de \texttt{0x1800000}.
+
+\subsubsection{Runtime Mínimo de Usuário e Aplicação Shell}
+
+No arquivo \texttt{user.c}, foi implementada a rotina de inicialização em assembly puro (\texttt{start}), responsável por preparar o registrador \texttt{sp} de usuário e transferir o controle para a função \texttt{main} da aplicação:
+
+\begin{verbatim}
+__attribute__((section(".text.start"))) __attribute__((naked)) void start(void) {
+  __asm__ __volatile__("mv sp, %[stack_top] \n"
+                       "call main           \n"
+                       "call exit           \n"
+                       ::[stack_top] "r"(__stack_top));
+}
+\end{verbatim}
+
+A função \texttt{exit} entra em laço infinito, e a primitiva \texttt{putchar} foi implementada para emitir uma instrução \texttt{ecall}, viabilizando o uso de \texttt{printf} (proveniente de \texttt{common.c}) no espaço de usuário. A aplicação (\texttt{shell.c}) emite uma mensagem inicial identificável e itera emitindo notificações periódicas de execução.
+
+\subsubsection{Conversão e Embutimento do Binário}
+
+Para evitar complexidade excessiva com parsers de formato ELF no kernel, a aplicação é compilada como um arquivo ELF (\texttt{shell.elf}) e convertida em um binário plano (\textit{raw binary}, \texttt{shell.bin}) via \texttt{llvm-objcopy}:
+
+\begin{verbatim}
+llvm-objcopy --set-section-flags .bss=alloc,contents -O binary shell.elf shell.bin
+llvm-objcopy -Ibinary -Oelf32-littleriscv shell.bin shell.bin.o
+\end{verbatim}
+
+O segundo comando empacota a imagem binária crua em um arquivo objeto ELF linkável (\texttt{shell.bin.o}), exportando os símbolos absolutos \texttt{\_binary\_shell\_bin\_start} e \texttt{\_binary\_shell\_bin\_size}.
+
+\subsubsection{Carregamento e Mapeamento de Páginas no Kernel}
+
+No kernel, a função \texttt{create\_process} foi atualizada para aceitar o ponteiro da imagem e seu tamanho. Cada bloco de 4~KB da imagem é copiado via \texttt{memcpy} para uma página física isolada alocada dinamicamente, sendo mapeado na tabela Sv32 em \texttt{USER\_BASE + offset} com as permissões de usuário \texttt{PAGE\_U | PAGE\_R | PAGE\_W | PAGE\_X}:
+
+\begin{verbatim}
+  if (image) {
+    for (uint32_t off = 0; off < image_size; off += PAGE_SIZE) {
+      paddr_t page = alloc_pages(1);
+      size_t remaining = image_size - off;
+      size_t copy_size = PAGE_SIZE <= remaining ? PAGE_SIZE : remaining;
+      memcpy((void *)page, (const char *)image + off, copy_size);
+      map_page(page_table, USER_BASE + off, page,
+               PAGE_U | PAGE_R | PAGE_W | PAGE_X);
+    }
+  }
+\end{verbatim}
+
+A cópia física dedicada assegura que múltiplos processos não compartilhem páginas mutáveis. O registrador inicial \texttt{ra} da pilha do processo é inicializado com o endereço de \texttt{user\_entry}, um trampolim que grava \texttt{sepc = USER\_BASE}, ativa \texttt{SSTATUS\_SPIE} e executa \texttt{sret}. O tratador de traps (\texttt{handle\_trap}) intercepta chamadas \texttt{scause == 8}, imprimindo o caractere passado em \texttt{a0} e incrementando \texttt{sepc} em 4 bytes para retorno transparente.
+
+Para garantir compatibilidade com compilações agregadas em sistemas avaliadores sem causar colisões de símbolos no vinculador, as definições de \texttt{putchar} e as declarações externas de \texttt{\_binary\_shell\_bin\_start} e \texttt{\_binary\_shell\_bin\_size} foram anotadas com o atributo fraco (\texttt{\_\_attribute\_\_((weak))}).
+
+\subsection{Trabalho 10: Modo Usuário e Isolamento de Privilégios}
+
+O décimo trabalho implementou a barreira formal de privilégio entre o sistema operacional (S-Mode) e as aplicações (U-Mode), garantindo que instruções restritas e acessos indevidos à memória física do kernel sejam interceptados diretamente pelo hardware da CPU.
+
+\subsubsection{Transição de Nível de Privilégio via \texttt{sret}}
+
+A transição controlada para U-Mode é realizada pela rotina trampolim \texttt{user\_entry}, implementada com o atributo \texttt{naked}:
+
+\begin{verbatim}
+__attribute__((naked)) void user_entry(void) {
+  __asm__ __volatile__(
+      "csrw sepc, %[sepc]\n"
+      "csrw sstatus, %[sstatus]\n"
+      "sret\n"
+      :
+      : [sepc] "r"(USER_BASE),
+        [sstatus] "r"(SSTATUS_SPIE));
+}
+\end{verbatim}
+
+A instrução \texttt{sret} (\textit{Supervisor Return}) executa três ações coordenadas pelo hardware RISC-V:
+\begin{enumerate}
+    \item O contador de programa ($pc$) é atualizado com o valor armazenado no registrador CSR \texttt{sepc} (definido como \texttt{USER\_BASE = 0x1000000});
+    \item O nível de privilégio da CPU é alterado para o valor presente no campo \texttt{SPP} (\textit{Supervisor Previous Privilege}, bit 8) do registrador \texttt{sstatus}. Como o valor gravado possui apenas o bit \texttt{SSTATUS\_SPIE} (bit 5) ativo, o campo \texttt{SPP} permanece em 0, forçando a CPU para o nível U-Mode;
+    \item As interrupções em nível de supervisor são reabilitadas transferindo o bit \texttt{SPIE} para \texttt{SIE}, e \texttt{SPIE} é redefinido para 1.
+\end{enumerate}
+
+\subsubsection{Configuração da Pilha e Proteção de Trap}
+
+Ao ingressar em \texttt{start}, a aplicação define o registrador de pilha de usuário \texttt{sp} para o topo da região reservada (\texttt{\_\_stack\_top}), situada no espaço virtual mapeado com permissão de usuário. Durante uma armadilha (\textit{trap}), a instrução \texttt{csrrw sp, sscratch, sp} em \texttt{kernel\_entry} comuta a pilha de usuário não-confiável pela pilha privativa do processo no kernel, mantendo o isolamento de execução entre os níveis.
+
+\subsubsection{Garantia de Isolamento de Memória}
+
+Na tabela Sv32 do processo, apenas as páginas copiadas da aplicação em \texttt{USER\_BASE} recebem o bit \texttt{PAGE\_U}. As páginas de código e dados do kernel (\texttt{\_\_kernel\_base} a \texttt{\_\_free\_ram\_end}) possuem apenas as permissões \texttt{PAGE\_R | PAGE\_W | PAGE\_X}. Consequentemente, qualquer tentativa de leitura, escrita ou salto a partir de U-Mode para a faixa do kernel viola as regras de tradução da MMU, gerando imediatamente uma falha de página (\textit{Page Fault}).
+
+\subsubsection{Diagnóstico e Tratamento Controlado de Exceções}
+
+Para atender ao requisito de diagnóstico claro de exceções, a rotina \texttt{handle\_trap} em \texttt{kernel.c} decodifica a causa da interrupção (\texttt{scause}):
+
+\begin{verbatim}
+void handle_trap(struct trap_frame *f) {
+  uint32_t scause = READ_CSR(scause);
+  uint32_t stval = READ_CSR(stval);
+  uint32_t user_pc = READ_CSR(sepc);
+
+  if (scause == 8) {
+    putchar(f->a0);
+    user_pc += 4;
+    WRITE_CSR(sepc, user_pc);
+    return;
+  }
+
+  const char *desc = "unknown trap";
+  switch (scause) {
+    case 0:  desc = "instruction address misaligned"; break;
+    case 1:  desc = "instruction access fault"; break;
+    case 2:  desc = "illegal instruction"; break;
+    case 3:  desc = "breakpoint"; break;
+    case 4:  desc = "load address misaligned"; break;
+    case 5:  desc = "load access fault"; break;
+    case 6:  desc = "store/amo address misaligned"; break;
+    case 7:  desc = "store/amo access fault"; break;
+    case 12: desc = "instruction page fault"; break;
+    case 13: desc = "load page fault"; break;
+    case 15: desc = "store/amo page fault"; break;
+  }
+
+  printf("Trap: %s (scause=%x, stval=%x, sepc=%x)\n", desc, scause, stval,
+         user_pc);
+  PANIC("unexpected trap scause=%x, stval=%x, sepc=%x", scause, stval,
+        user_pc);
+}
+\end{verbatim}
+
+Quando uma aplicação em U-Mode tenta executar instruções restritas de controle e status (como \texttt{csrr} ou \texttt{csrw} direcionadas a registradores de supervisor, \texttt{sret} ou \texttt{wfi}), a CPU dispara a exceção de instrução ilegal (\texttt{scause = 2}). Se houver tentativa de escrita ou leitura na memória reservada do kernel, a MMU sinaliza falha de página (\texttt{scause = 13} ou \texttt{15}). Em ambos os casos, o kernel captura o evento, imprime a descrição formal do erro, o endereço da falha (\texttt{sepc}) e o valor de contexto (\texttt{stval}), contendo o sistema em estado seguro sem reboots descontrolados.
+
 \section{Atividades Não Realizadas}
 
-Mantendo a precisão sobre o escopo entregue, relata-se as tarefas pendentes do segundo bloco:
-
-\begin{itemize}
-    \item \textbf{Trabalhos 09 e 10 (Modo Usuário e Syscalls):} A segregação de privilégios com o nível U-Mode e a interface de chamadas de sistema (\texttt{ecall}) para viabilizar a execução segura de aplicações de usuário permanecem pendentes para as próximas etapas.
-\end{itemize}
+O escopo da Entrega 2 (Trabalhos 06 a 10) foi concluído integralmente. As tarefas subsequentes (como sistema de arquivos virtual, interface expandida de chamadas de sistema POSIX-like e preempção por temporizador) integram o escopo da Entrega 3.
 
 \section{Resultados e Validação}
 
@@ -244,11 +406,40 @@ BABABABABABABABABABABABABABABABABABABABABABABABABABABABA...
         \item O comando \texttt{info mem} confirmou o mapeamento identidade integral do kernel de \texttt{0x80200000} até \texttt{0x84231000} com atributos de permissão \texttt{rwx}.
         \item A execução contínua dos processos sob paginação ativa ocorreu sem geração de falhas espúrias. Ademais, eventuais acessos inválidos a regiões não mapeadas são interceptados pelo tratador de interrupções (\texttt{handle\_trap}) via \texttt{stvec}, emitindo um pânico controlado sem reiniciar o processador.
     \end{itemize}
+
+    \item \textbf{Validação das Aplicações de Usuário e Embutimento de Binário:} A cadeia de construção automatizada gerou o binário plano \texttt{shell.bin} (66.256 bytes) e o vinculou ao kernel através de \texttt{shell.bin.o}. No QEMU, a inspeção via monitor confirmou o mapeamento correto da faixa \texttt{0x01000000} com atributos de usuário (\texttt{rwxu}) sobre a memória física alocada.
+    
+    A execução serial comprovou o chaveamento de contexto, a transição para a rotina de usuário e a saída contínua do shell:
+\begin{verbatim}
+shell_bin size = 66256
+shell_bin[0] = 37
+Hello World from user application (shell)!
+[shell] application is running...
+[shell] application is running...
+\end{verbatim}
+    A recepção regular das mensagens comprovou que a chamada \texttt{ecall} oriunda da aplicação de usuário foi interceptada com sucesso pelo tratador do kernel (\texttt{scause = 8}), confirmando a integração ponta a ponta do runtime e do tratador de interrupções.
+
+    \item \textbf{Validação do Modo Usuário e Isolamento de Privilégios:} A eficácia da separação de privilégios foi comprovada através de testes dedicados em ambiente emulado:
+    \begin{itemize}
+        \item \textit{Transição e Execução em U-Mode:} O boot do kernel e o chaveamento com \texttt{sret} posicionaram a execução no endereço \texttt{0x01000000}, com a aplicação shell emitindo mensagens contínuas no terminal serial via \texttt{ecall}.
+        \item \textit{Contenção de Instrução Privilegiada:} Ao injetar a instrução \texttt{csrr t0, sstatus} na aplicação de usuário, o hardware rejeitou a operação e gerou a exceção de instrução ilegal:
+\begin{verbatim}
+Trap: illegal instruction (scause=00000002, stval=100022f3, sepc=0100001c)
+PANIC: kernel.c:93: unexpected trap scause=00000002, stval=100022f3, sepc=0100001c
+\end{verbatim}
+        O valor de \texttt{stval} capturou o opcode da instrução inválida e o \texttt{sepc} apontou com precisão para a instrução na aplicação.
+        \item \textit{Contenção de Acesso à Memória do Kernel:} Ao forçar uma gravação no endereço de kernel \texttt{0x80200000} a partir do código de usuário, a MMU bloqueou o acesso devido à ausência do bit \texttt{PAGE\_U}, disparando a falha de página controlada:
+\begin{verbatim}
+Trap: store/amo page fault (scause=0000000f, stval=80200000, sepc=01000026)
+PANIC: kernel.c:93: unexpected trap scause=0000000f, stval=80200000, sepc=01000026
+\end{verbatim}
+    \end{itemize}
+    Ambos os cenários comprovaram a robustez do isolamento de hardware e a clareza do diagnóstico emitido pelo kernel.
 \end{enumerate}
 
 \section{Conclusão}
 
-As atividades desenvolvidas nesta segunda etapa dotaram o kernel de recursos fundamentais de infraestrutura: alocação dinâmica de memória física por páginas, concorrência cooperativa de processos com pilhas dedicadas e gerenciamento de memória virtual paginada sob a arquitetura Sv32 do RISC-V. A continuidade das tarefas envolverá o isolamento de aplicações no nível de privilégio U-Mode e a implementação do canal de chamadas de sistema.
+As atividades desenvolvidas nesta segunda etapa dotaram o kernel de recursos fundamentais de infraestrutura de sistemas operacionais: alocação dinâmica de memória física por páginas alinhadas, concorrência cooperativa de processos com pilhas dedicadas, gerenciamento de memória virtual paginada sob a arquitetura Sv32 do RISC-V, embutimento e execução de binários independentes no espaço de usuário com runtime próprio, e isolamento formal de privilégios de CPU em modo usuário (U-Mode) com diagnóstico controlado de exceções. O kernel encontra-se preparado para o desenvolvimento da terceira etapa, com foco em chamadas de sistema estruturadas e sistema de arquivos.
 
 \begin{thebibliography}{9}
 \bibitem{nuta2023}
