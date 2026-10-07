@@ -8,13 +8,13 @@
 \sloppy
 
 \title{Relatório Prático: Kernel em RISC-V\\
-\large Alocação de Memória Física, Processos, Paginação Sv32, Aplicações e Modo Usuário}
+\large Alocação de Memória Física, Processos, Paginação Sv32 e Modo Usuário}
 
-\author{João Pedro Sant' Ana de Carvalho}
+\author{João Pedro Sant Ana de Carvalho}
 
 \address{Faculdade de Computação -- Universidade Federal de Mato Grosso do Sul (UFMS)\\
   Campo Grande -- MS -- Brasil
-  \email{joao.sant@ufms.br}
+  \email{santc.joao@gmail.com}
 }
 
 \begin{document}
@@ -22,35 +22,35 @@
 \maketitle
 
 \begin{abstract}
-This report documents the continuation of the minimal 32-bit RISC-V operating system kernel, completing the full scope of the second project milestone. The accomplished tasks encompass physical memory management via a page-aligned bump allocator (Task 6), process infrastructure featuring dedicated process control blocks, private stacks, assembly context switching, cooperative round-robin scheduling, and kernel stack isolation using the sscratch register (Task 7), two-level Sv32 virtual memory management with identity mapping and MMU activation via the satp register (Task 8), userland application memory layout, minimal runtime library, object-based binary embedding, and application dispatch (Task 9), as well as CPU privilege transition to user mode (U-Mode) via sret, CSR configuration, user page permissions, hardware-enforced privilege isolation, and controlled trap exception diagnostics (Task 10). The entire system was validated on the QEMU emulator.
+This report documents the continuation of the minimal 32-bit RISC-V operating system kernel for the Operating Systems course. The completed tasks include page-aligned physical memory allocation (Task 6), cooperative process management with context switching (Task 7), Sv32 two-level paging and virtual memory activation (Task 8), userland application build, runtime, and binary embedding (Task 9), and user mode (U-Mode) privilege transition with exception handling (Task 10). All implementations were verified on the QEMU emulator.
 \end{abstract}
 
 \begin{resumo}
-Este relatório descreve a evolução de um kernel mínimo para a arquitetura RISC-V de 32 bits, concluindo integralmente o escopo da segunda entrega prática. Foram implementados o alocador dinâmico de páginas de memória física alinhadas a 4~KB (Trabalho 06), a infraestrutura de processos com blocos de controle (PCB), pilhas privativas, troca de contexto em assembly, escalonamento cooperativo e proteção da pilha de interrupção com o registrador sscratch (Trabalho 07), o gerenciamento de memória virtual Sv32 em dois níveis com chaveamento de MMU via satp (Trabalho 08), o suporte à construção e embutimento de aplicações no espaço de usuário com runtime mínimo (Trabalho 09), e a transição de privilégio da CPU para o modo usuário (U-Mode) via instrução sret, configuração dos registradores CSR, isolamento de privilégio de instruções e memória por hardware, e diagnóstico controlado de exceções (Trabalho 10). Todas as implementações foram validadas no emulador QEMU.
+Este relatório apresenta a continuidade do desenvolvimento de um kernel mínimo para a arquitetura RISC-V de 32 bits na disciplina de Sistemas Operacionais. Foram implementadas as cinco etapas da segunda entrega: alocação de memória física por páginas de 4~KB (Trabalho 06), gerenciamento de processos com troca de contexto cooperativa (Trabalho 07), paginação de memória virtual no padrão Sv32 (Trabalho 08), suporte a aplicações em espaço de usuário com binário embutido (Trabalho 09) e execução em modo usuário (U-Mode) com isolamento de privilégios e diagnóstico de exceções (Trabalho 10). O funcionamento de todos os módulos foi validado no emulador QEMU.
 \end{resumo}
 
 \section{Introdução}
 
-Após o estabelecimento do boot em modo \textit{bare-metal}, da saída serial via chamadas OpenSBI e do suporte a exceções da CPU, o desenvolvimento do sistema avançou para os pilares essenciais de gerenciamento de memória, concorrência e execução de aplicações em um sistema operacional.
+Dando continuidade ao desenvolvimento do kernel bare-metal para a arquitetura RISC-V de 32 bits (RV32), este relatório descreve as atividades realizadas na segunda entrega prática da disciplina de Sistemas Operacionais.
 
-Este relatório abrange as atividades concluídas e testadas correspondentes ao escopo integral da segunda entrega prática da disciplina:
+O foco desta etapa foi expandir o kernel básico criado anteriormente, adicionando os mecanismos essenciais de gerenciamento de memória, execução concorrente de tarefas e separação de privilégios entre o kernel e as aplicações de usuário.
+
+Todas as cinco tarefas propostas para esta entrega foram concluídas e testadas no emulador QEMU:
 \begin{itemize}
-    \item \textbf{Trabalho 06}: Alocação de memória física alinhada a páginas de 4~KB;
+    \item \textbf{Trabalho 06}: Alocação de memória física por páginas de 4~KB;
     \item \textbf{Trabalho 07}: Estrutura de processos, troca de contexto e escalonamento cooperativo;
-    \item \textbf{Trabalho 08}: Tabelas de páginas Sv32 e gerenciamento de memória virtual;
-    \item \textbf{Trabalho 09}: Aplicações de usuário, runtime inicial e embutimento de binários;
-    \item \textbf{Trabalho 10}: Transição para modo usuário (U-Mode), isolamento de privilégios e diagnóstico de exceções.
+    \item \textbf{Trabalho 08}: Tabelas de páginas e memória virtual Sv32;
+    \item \textbf{Trabalho 09}: Aplicações em espaço de usuário e embutimento de binários;
+    \item \textbf{Trabalho 10}: Transição para modo usuário (U-Mode), isolamento de privilégios e tratamento de exceções.
 \end{itemize}
-
-Com a conclusão deste ciclo, todas as metas da Entrega 2 foram alcançadas com sucesso.
 
 \section{Atividades Realizadas}
 
 \subsection{Trabalho 06: Alocação de Memória Física}
 
-Para permitir a criação dinâmica de estruturas pelo kernel sem recorrer à alocação estática arbitrária, foi implementado um alocador de páginas físicas baseado na estratégia \textit{Bump Allocator} (ou alocador linear).
+Para permitir que o kernel crie estruturas dinamicamente sem recorrer à alocação estática arbitrária, foi implementado um alocador simples de páginas físicas (\textit{bump allocator}).
 
-A delimitação da memória disponível foi realizada diretamente no linker script (\texttt{kernel.ld}), logo após o espaço reservado para a pilha do kernel (\texttt{\_\_stack\_top}). A área foi alinhada a uma fronteira de 4096 bytes (4~KB) e estendida em 64~MB, demarcada pelos símbolos \texttt{\_\_free\_ram} e \texttt{\_\_free\_ram\_end}:
+No linker script (\texttt{kernel.ld}), a região de memória livre foi delimitada logo após a pilha do kernel (\texttt{\_\_stack\_top}). Essa área foi alinhada a 4~KB e configurada com 64~MB de tamanho, demarcada pelos símbolos \texttt{\_\_free\_ram} e \texttt{\_\_free\_ram\_end}:
 
 \begin{verbatim}
     . = ALIGN(4096);
@@ -59,7 +59,7 @@ A delimitação da memória disponível foi realizada diretamente no linker scri
     __free_ram_end = .;
 \end{verbatim}
 
-No arquivo \texttt{common.h}, foi definida a constante fundamental \texttt{PAGE\_SIZE} como 4096. A função \texttt{alloc\_pages} no arquivo \texttt{kernel.c} gerencia a alocação de $n$ páginas consecutivas. A variável estática \texttt{next\_paddr} mantém o endereço da próxima região livre. A inicialização é resolvida dinamicamente no primeiro ciclo para garantir estrita conformidade com expressões constantes em C:
+No arquivo \texttt{common.h}, foi definida a constante \texttt{PAGE\_SIZE} como 4096. A função \texttt{alloc\_pages} no arquivo \texttt{kernel.c} gerencia a alocação de $n$ páginas consecutivas. A variável estática \texttt{next\_paddr} mantém o endereço da próxima região livre, iniciando em \texttt{\_\_free\_ram} na primeira chamada. Se a memória solicitada ultrapassar o limite \texttt{\_\_free\_ram\_end}, o kernel interrompe a execução com \texttt{PANIC("out of memory")}. Toda a área alocada é limpa com zeros via \texttt{memset} antes do retorno:
 
 \begin{verbatim}
 paddr_t alloc_pages(uint32_t n) {
@@ -78,16 +78,9 @@ paddr_t alloc_pages(uint32_t n) {
 }
 \end{verbatim}
 
-A função assegura três invariantes:
-\begin{enumerate}
-    \item Os endereços retornados são múltiplos exatos de 4~KB;
-    \item Em caso de esgotamento do limite superior (\texttt{\_\_free\_ram\_end}), dispara-se \texttt{PANIC("out of memory")};
-    \item A memória retornada é integralmente limpa com zeros via \texttt{memset}, evitando a propagação de lixo de memória.
-\end{enumerate}
-
 \subsection{Trabalho 07: Processos e Troca de Contexto}
 
-O sétimo trabalho viabilizou a execução concorrente de tarefas no kernel. No arquivo \texttt{kernel.h}, foi definido o Bloco de Controle de Processo (\texttt{struct process}) e a capacidade máxima de processos no sistema (\texttt{PROCS\_MAX = 8}):
+O sétimo trabalho implementou a estrutura básica para permitir múltiplos processos concorrentes no kernel. No arquivo \texttt{kernel.h}, foi definida a estrutura \texttt{struct process} e a capacidade máxima de 8 processos simultâneos (\texttt{PROCS\_MAX}):
 
 \begin{verbatim}
 #define PROCS_MAX 8
@@ -103,9 +96,7 @@ struct process {
 };
 \end{verbatim}
 
-Cada processo possui sua própria pilha de execução com 8~KB de extensão, eliminando a dependência de pilha única global.
-
-A rotina de troca de contexto (\texttt{switch\_context}) foi implementada em assembly com o atributo \texttt{naked}. Seguindo a convenção de chamada da ABI RISC-V, apenas os 13 registradores \textit{callee-saved} (\texttt{ra} e \texttt{s0} a \texttt{s11}) necessitam de salvamento na pilha da tarefa corrente, uma vez que os registradores temporários (\textit{caller-saved}) já são geridos pelo compilador no momento da invocação:
+Cada processo possui sua própria pilha privativa de 8~KB. Como o escalonamento é cooperativo, a troca de contexto (\texttt{switch\_context}) funciona como uma chamada de função normal segundo a ABI do RISC-V. Dessa forma, é necessário salvar e restaurar apenas os 13 registradores \textit{callee-saved} (\texttt{ra} e \texttt{s0} a \texttt{s11}), enquanto os registradores temporários são preservados pelo compilador:
 
 \begin{verbatim}
 __attribute__((naked)) void switch_context(uint32_t *prev_sp,
@@ -145,34 +136,20 @@ __attribute__((naked)) void switch_context(uint32_t *prev_sp,
 }
 \end{verbatim}
 
-A função \texttt{create\_process} aloca um descritor livre na tabela estática \texttt{procs}, monta a estrutura inicial da pilha empilhando zeros para os registradores salvos e o endereço de entrada no registrador \texttt{ra}, ajustando o estado para \texttt{PROC\_RUNNABLE}.
-
-O escalonador cooperativo (\texttt{yield}) realiza a busca circular em rodízio pelo próximo processo executável com \texttt{pid > 0}. Caso nenhum outro processo esteja pronto, o \texttt{idle\_proc} (PID 0) é selecionado. Durante a transição, a base da pilha do próximo processo é gravada no registrador CSR \texttt{sscratch}, permitindo que o tratador \texttt{kernel\_entry} recupere de forma segura a pilha privativa do processo através da instrução \texttt{csrrw sp, sscratch, sp}.
+A função \texttt{create\_process} busca um slot livre no vetor \texttt{procs}, inicializa a pilha com zeros nos registradores salvos, coloca o endereço de entrada no registrador \texttt{ra} e marca o estado como \texttt{PROC\_RUNNABLE}. A função \texttt{yield} realiza o escalonamento em rodízio (\textit{round-robin}) entre os processos ativos. Antes de chavear o contexto, o topo da pilha do próximo processo é salvo no registrador CSR \texttt{sscratch}, permitindo que o tratador de interrupções preserve a pilha do kernel caso ocorra uma exceção.
 
 \subsection{Trabalho 08: Tabelas de Páginas e Memória Virtual Sv32}
 
-O oitavo trabalho introduziu o suporte ao mecanismo de tradução e isolamento de memória virtual Sv32 do RISC-V. No modelo Sv32, os endereços virtuais de 32 bits são decompostos em dois níveis hierárquicos: o índice de primeiro nível ($VPN[1]$, 10 bits), o índice de segundo nível ($VPN[0]$, 10 bits) e o deslocamento dentro da página ($Offset$, 12 bits).
+No oitavo trabalho, foi configurado o mecanismo de paginação e isolamento de memória virtual Sv32 do RISC-V. No modelo Sv32, os endereços virtuais de 32 bits são traduzidos em dois níveis: o índice de primeiro nível (\texttt{vpn1}, 10 bits), o índice de segundo nível (\texttt{vpn0}, 10 bits) e o deslocamento da página (12 bits, para páginas de 4~KB).
 
-No arquivo \texttt{kernel.h}, foram estabelecidas as definições de controle do registrador \texttt{satp} e das entradas da tabela de páginas (PTE):
-\begin{verbatim}
-#define SATP_SV32 (1u << 31)
-#define PAGE_V    (1 << 0) // Entrada válida
-#define PAGE_R    (1 << 1) // Permissão de leitura
-#define PAGE_W    (1 << 2) // Permissão de escrita
-#define PAGE_X    (1 << 3) // Permissão de execução
-#define PAGE_U    (1 << 4) // Acesso em modo usuário
-\end{verbatim}
+No arquivo \texttt{kernel.h}, foram definidas as máscaras do registrador \texttt{satp} e os bits de permissão das entradas de tabela de páginas (PTE): \texttt{PAGE\_V} (válida), \texttt{PAGE\_R} (leitura), \texttt{PAGE\_W} (escrita), \texttt{PAGE\_X} (execução) e \texttt{PAGE\_U} (acesso em modo usuário).
 
-A estrutura de processo (\texttt{struct process}) foi atualizada para conter o ponteiro da tabela raiz de primeiro nível (\texttt{uint32\_t *page\_table}).
+A função \texttt{map\_page} em \texttt{kernel.c} gerencia a associação entre endereços virtuais e físicos:
 
-No linker script (\texttt{kernel.ld}), exportou-se o símbolo \texttt{\_\_kernel\_base = .;} logo após a atribuição do endereço base em \texttt{0x80200000}, estabelecendo a fronteira inferior da memória física ocupada pela imagem do kernel.
-
-A função \texttt{map\_page} em \texttt{kernel.c} gerencia a associação entre endereços virtuais e físicos em blocos alinhados a 4~KB:
 \begin{verbatim}
 void map_page(uint32_t *table1, uint32_t vaddr, paddr_t paddr, uint32_t flags) {
   if (!is_aligned(vaddr, PAGE_SIZE))
     PANIC("unaligned vaddr %x", vaddr);
-
   if (!is_aligned(paddr, PAGE_SIZE))
     PANIC("unaligned paddr %x", paddr);
 
@@ -188,125 +165,49 @@ void map_page(uint32_t *table1, uint32_t vaddr, paddr_t paddr, uint32_t flags) {
 }
 \end{verbatim}
 
-Quando uma entrada de primeiro nível ainda não existe (\texttt{PAGE\_V == 0}), a função aloca dinamicamente uma página para a tabela de segundo nível através de \texttt{alloc\_pages(1)}. Em seguida, a entrada folha correspondente é gravada com o número da página física ($PPN = paddr / PAGE\_SIZE$), as flags de permissão e o bit de validade.
+Se a entrada de primeiro nível ainda não existir, uma página é alocada via \texttt{alloc\_pages(1)} para a tabela de segundo nível. Em seguida, a entrada folha correspondente recebe o número da página física (\textit{PPN}) e os bits de controle.
 
-Na função \texttt{create\_process}, cada tarefa recebe uma tabela de páginas raiz. Para garantir que o código e as estruturas do kernel permaneçam acessíveis após a ativação da MMU, realiza-se o mapeamento identidade ($vaddr = paddr$) em toda a faixa de \texttt{\_\_kernel\_base} até \texttt{\_\_free\_ram\_end} com permissões completas (\texttt{PAGE\_R | PAGE\_W | PAGE\_X}):
-\begin{verbatim}
-  uint32_t *page_table = (uint32_t *)alloc_pages(1);
-  for (paddr_t paddr = (paddr_t)__kernel_base;
-       paddr < (paddr_t)__free_ram_end; paddr += PAGE_SIZE)
-    map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
-
-  proc->page_table = page_table;
-\end{verbatim}
-
-Durante a troca de processos em \texttt{yield}, a MMU é atualizada gravando-se no registrador \texttt{satp} o identificador de modo \texttt{SATP\_SV32} combinado com o PPN da tabela raiz do próximo processo. A escrita no \texttt{satp} é envolvida por instruções \texttt{sfence.vma} antes e depois, garantindo a conclusão das alterações em memória e a invalidação de entradas obsoletas na TLB:
-\begin{verbatim}
-  __asm__ __volatile__(
-      "sfence.vma\n"
-      "csrw satp, %[satp]\n"
-      "sfence.vma\n"
-      "csrw sscratch, %[sscratch]\n"
-      :
-      : [satp] "r"(SATP_SV32 | ((uint32_t)next->page_table / PAGE_SIZE)),
-        [sscratch] "r"((uint32_t)&next->stack[sizeof(next->stack)]));
-\end{verbatim}
+Para manter o código e os dados do kernel acessíveis após ativar a MMU, a função \texttt{create\_process} aloca uma tabela raiz para cada processo e mapeia toda a memória do kernel (\texttt{\_\_kernel\_base} até \texttt{\_\_free\_ram\_end}) em mapeamento identidade ($vaddr = paddr$) com permissões completas (\texttt{rwx}). Durante a troca de processos em \texttt{yield}, o registrador \texttt{satp} é atualizado com o modo Sv32 e o PPN da tabela raiz, utilizando instruções \texttt{sfence.vma} antes e depois para sincronizar a memória e invalidar entradas antigas da TLB.
 
 \subsection{Trabalho 09: Aplicações de Usuário e Embutimento de Binários}
 
-O nono trabalho estabeleceu o suporte à execução de código de usuário dissociado da imagem do kernel. O modelo adotado segrega fisicamente o espaço de endereçamento, provê uma biblioteca de runtime mínima para a aplicação e embute o binário resultante no executável do kernel através de encapsulamento ELF.
+O nono trabalho viabilizou a execução de programas de usuário desacoplados do executável do kernel.
 
-\subsubsection{Layout de Memória e Linker Script da Aplicação}
-
-No arquivo \texttt{user.ld}, foi definido o layout de memória específico da aplicação em espaço de usuário, com endereço virtual base em \texttt{0x1000000} (\texttt{USER\_BASE}), garantindo o desacoplamento do espaço do kernel (\texttt{0x80200000}):
+No arquivo \texttt{user.ld}, foi definido o layout de memória das aplicações com endereço base virtual em \texttt{0x1000000} (\texttt{USER\_BASE}), separando o espaço de usuário do espaço do kernel (\texttt{0x80200000}). Foram alocados 64~KB para a pilha do processo (\texttt{\_\_stack\_top}):
 
 \begin{verbatim}
 ENTRY(start)
-
 SECTIONS {
     . = 0x1000000;
-
-    .text :{
-        KEEP(*(.text.start));
-        *(.text .text.*);
-    }
-
-    .rodata : ALIGN(4) {
-        *(.rodata .rodata.*);
-    }
-
-    .data : ALIGN(4) {
-        *(.data .data.*);
-    }
-
+    .text : { KEEP(*(.text.start)); *(.text .text.*); }
+    .rodata : ALIGN(4) { *(.rodata .rodata.*); }
+    .data : ALIGN(4) { *(.data .data.*); }
     .bss : ALIGN(4) {
         *(.bss .bss.* .sbss .sbss.*);
-
         . = ALIGN(16);
-        . += 64 * 1024; /* 64KB */
+        . += 64 * 1024;
         __stack_top = .;
-
         ASSERT(. < 0x1800000, "too large executable");
     }
 }
 \end{verbatim}
 
-A seção \texttt{.text.start} fixa a rotina \texttt{start} no início do executável. O linker script aloca 64~KB para a pilha do processo (\texttt{\_\_stack\_top}) e aplica uma asserção estática impedindo que a imagem ultrapasse o limite de \texttt{0x1800000}.
+No arquivo \texttt{user.c}, a rotina inicial em assembly \texttt{start} aponta o registrador \texttt{sp} para \texttt{\_\_stack\_top} e chama a função \texttt{main} do programa. Além disso, implementou-se a função \texttt{putchar} emitindo a instrução \texttt{ecall}, o que permitiu reaproveitar o \texttt{printf} de \texttt{common.c} dentro da aplicação de usuário (\texttt{shell.c}).
 
-\subsubsection{Runtime Mínimo de Usuário e Aplicação Shell}
-
-No arquivo \texttt{user.c}, foi implementada a rotina de inicialização em assembly puro (\texttt{start}), responsável por preparar o registrador \texttt{sp} de usuário e transferir o controle para a função \texttt{main} da aplicação:
-
-\begin{verbatim}
-__attribute__((section(".text.start"))) __attribute__((naked)) void start(void) {
-  __asm__ __volatile__("mv sp, %[stack_top] \n"
-                       "call main           \n"
-                       "call exit           \n"
-                       ::[stack_top] "r"(__stack_top));
-}
-\end{verbatim}
-
-A função \texttt{exit} entra em laço infinito, e a primitiva \texttt{putchar} foi implementada para emitir uma instrução \texttt{ecall}, viabilizando o uso de \texttt{printf} (proveniente de \texttt{common.c}) no espaço de usuário. A aplicação (\texttt{shell.c}) emite uma mensagem inicial identificável e itera emitindo notificações periódicas de execução.
-
-\subsubsection{Conversão e Embutimento do Binário}
-
-Para evitar complexidade excessiva com parsers de formato ELF no kernel, a aplicação é compilada como um arquivo ELF (\texttt{shell.elf}) e convertida em um binário plano (\textit{raw binary}, \texttt{shell.bin}) via \texttt{llvm-objcopy}:
+Para incluir a aplicação no sistema sem a necessidade de implementar um leitor de ELF no kernel, a ferramenta \texttt{llvm-objcopy} converte o binário compilado (\texttt{shell.elf}) em um arquivo binário plano (\texttt{shell.bin}) e o encapsula como objeto linkável (\texttt{shell.bin.o}):
 
 \begin{verbatim}
 llvm-objcopy --set-section-flags .bss=alloc,contents -O binary shell.elf shell.bin
 llvm-objcopy -Ibinary -Oelf32-littleriscv shell.bin shell.bin.o
 \end{verbatim}
 
-O segundo comando empacota a imagem binária crua em um arquivo objeto ELF linkável (\texttt{shell.bin.o}), exportando os símbolos absolutos \texttt{\_binary\_shell\_bin\_start} e \texttt{\_binary\_shell\_bin\_size}.
-
-\subsubsection{Carregamento e Mapeamento de Páginas no Kernel}
-
-No kernel, a função \texttt{create\_process} foi atualizada para aceitar o ponteiro da imagem e seu tamanho. Cada bloco de 4~KB da imagem é copiado via \texttt{memcpy} para uma página física isolada alocada dinamicamente, sendo mapeado na tabela Sv32 em \texttt{USER\_BASE + offset} com as permissões de usuário \texttt{PAGE\_U | PAGE\_R | PAGE\_W | PAGE\_X}:
-
-\begin{verbatim}
-  if (image) {
-    for (uint32_t off = 0; off < image_size; off += PAGE_SIZE) {
-      paddr_t page = alloc_pages(1);
-      size_t remaining = image_size - off;
-      size_t copy_size = PAGE_SIZE <= remaining ? PAGE_SIZE : remaining;
-      memcpy((void *)page, (const char *)image + off, copy_size);
-      map_page(page_table, USER_BASE + off, page,
-               PAGE_U | PAGE_R | PAGE_W | PAGE_X);
-    }
-  }
-\end{verbatim}
-
-A cópia física dedicada assegura que múltiplos processos não compartilhem páginas mutáveis. O registrador inicial \texttt{ra} da pilha do processo é inicializado com o endereço de \texttt{user\_entry}, um trampolim que grava \texttt{sepc = USER\_BASE}, ativa \texttt{SSTATUS\_SPIE} e executa \texttt{sret}. O tratador de traps (\texttt{handle\_trap}) intercepta chamadas \texttt{scause == 8}, imprimindo o caractere passado em \texttt{a0} e incrementando \texttt{sepc} em 4 bytes para retorno transparente.
-
-Para garantir compatibilidade com compilações agregadas em sistemas avaliadores sem causar colisões de símbolos no vinculador, as definições de \texttt{putchar} e as declarações externas de \texttt{\_binary\_shell\_bin\_start} e \texttt{\_binary\_shell\_bin\_size} foram anotadas com o atributo fraco (\texttt{\_\_attribute\_\_((weak))}).
+Esses comandos exportam os símbolos \texttt{\_binary\_shell\_bin\_start} e \texttt{\_binary\_shell\_bin\_size}. No kernel, ao carregar a aplicação em \texttt{create\_process}, cada bloco de 4~KB da imagem é copiado com \texttt{memcpy} para páginas físicas dedicadas e mapeado a partir de \texttt{USER\_BASE} com a flag de usuário \texttt{PAGE\_U} ativa.
 
 \subsection{Trabalho 10: Modo Usuário e Isolamento de Privilégios}
 
-O décimo trabalho implementou a barreira formal de privilégio entre o sistema operacional (S-Mode) e as aplicações (U-Mode), garantindo que instruções restritas e acessos indevidos à memória física do kernel sejam interceptados diretamente pelo hardware da CPU.
+O décimo trabalho implementou o isolamento de privilégios da CPU, garantindo que as aplicações executem em Modo Usuário (U-Mode) e que qualquer instrução restrita ou acesso à memória física do kernel seja interceptado diretamente pelo hardware.
 
-\subsubsection{Transição de Nível de Privilégio via \texttt{sret}}
-
-A transição controlada para U-Mode é realizada pela rotina trampolim \texttt{user\_entry}, implementada com o atributo \texttt{naked}:
+A transição para U-Mode é realizada pela rotina trampolim \texttt{user\_entry}:
 
 \begin{verbatim}
 __attribute__((naked)) void user_entry(void) {
@@ -320,24 +221,16 @@ __attribute__((naked)) void user_entry(void) {
 }
 \end{verbatim}
 
-A instrução \texttt{sret} (\textit{Supervisor Return}) executa três ações coordenadas pelo hardware RISC-V:
+A instrução \texttt{sret} executa três passos controlados pelo hardware:
 \begin{enumerate}
-    \item O contador de programa ($pc$) é atualizado com o valor armazenado no registrador CSR \texttt{sepc} (definido como \texttt{USER\_BASE = 0x1000000});
-    \item O nível de privilégio da CPU é alterado para o valor presente no campo \texttt{SPP} (\textit{Supervisor Previous Privilege}, bit 8) do registrador \texttt{sstatus}. Como o valor gravado possui apenas o bit \texttt{SSTATUS\_SPIE} (bit 5) ativo, o campo \texttt{SPP} permanece em 0, forçando a CPU para o nível U-Mode;
-    \item As interrupções em nível de supervisor são reabilitadas transferindo o bit \texttt{SPIE} para \texttt{SIE}, e \texttt{SPIE} é redefinido para 1.
+    \item Salta o contador de programa ($pc$) para o endereço gravado em \texttt{sepc} (\texttt{USER\_BASE});
+    \item Altera o nível de privilégio da CPU para o valor presente no campo \texttt{SPP} de \texttt{sstatus}. Como gravamos apenas \texttt{SSTATUS\_SPIE}, o campo \texttt{SPP} permanece em 0, comutando a CPU para U-Mode;
+    \item Restaura a habilitação das interrupções de supervisor copiando o bit \texttt{SPIE} para \texttt{SIE}.
 \end{enumerate}
 
-\subsubsection{Configuração da Pilha e Proteção de Trap}
+O isolamento de memória é garantido pelas permissões da tabela Sv32: apenas as páginas da aplicação possuem a flag \texttt{PAGE\_U}. As páginas do kernel possuem apenas permissões de supervisor, gerando imediatamente uma falta de página (\textit{Page Fault}) caso U-Mode tente acessá-las. Da mesma forma, instruções restritas (como \texttt{csrr}, \texttt{csrw} ou \texttt{sret}) disparam uma exceção de instrução ilegal se executadas em U-Mode.
 
-Ao ingressar em \texttt{start}, a aplicação define o registrador de pilha de usuário \texttt{sp} para o topo da região reservada (\texttt{\_\_stack\_top}), situada no espaço virtual mapeado com permissão de usuário. Durante uma armadilha (\textit{trap}), a instrução \texttt{csrrw sp, sscratch, sp} em \texttt{kernel\_entry} comuta a pilha de usuário não-confiável pela pilha privativa do processo no kernel, mantendo o isolamento de execução entre os níveis.
-
-\subsubsection{Garantia de Isolamento de Memória}
-
-Na tabela Sv32 do processo, apenas as páginas copiadas da aplicação em \texttt{USER\_BASE} recebem o bit \texttt{PAGE\_U}. As páginas de código e dados do kernel (\texttt{\_\_kernel\_base} a \texttt{\_\_free\_ram\_end}) possuem apenas as permissões \texttt{PAGE\_R | PAGE\_W | PAGE\_X}. Consequentemente, qualquer tentativa de leitura, escrita ou salto a partir de U-Mode para a faixa do kernel viola as regras de tradução da MMU, gerando imediatamente uma falha de página (\textit{Page Fault}).
-
-\subsubsection{Diagnóstico e Tratamento Controlado de Exceções}
-
-Para atender ao requisito de diagnóstico claro de exceções, a rotina \texttt{handle\_trap} em \texttt{kernel.c} decodifica a causa da interrupção (\texttt{scause}):
+Por fim, a função \texttt{handle\_trap} em \texttt{kernel.c} foi estruturada para identificar a causa da exceção (\texttt{scause}). Quando \texttt{scause == 8} (chamada de sistema via \texttt{ecall} em U-Mode), o kernel imprime o caractere em \texttt{a0}, avança \texttt{sepc} em 4 bytes e retorna normalmente. Para qualquer outra exceção inesperada, o kernel imprime a causa, o endereço de falha (\texttt{sepc}) e o valor de contexto (\texttt{stval}), interrompendo a CPU de forma segura através de \texttt{PANIC}:
 
 \begin{verbatim}
 void handle_trap(struct trap_frame *f) {
@@ -367,49 +260,43 @@ void handle_trap(struct trap_frame *f) {
     case 15: desc = "store/amo page fault"; break;
   }
 
-  printf("Trap: %s (scause=%x, stval=%x, sepc=%x)\n", desc, scause, stval,
-         user_pc);
-  PANIC("unexpected trap scause=%x, stval=%x, sepc=%x", scause, stval,
-        user_pc);
+  printf("Trap: %s (scause=%x, stval=%x, sepc=%x)\n",
+         desc, scause, stval, user_pc);
+  PANIC("unexpected trap scause=%x, stval=%x, sepc=%x",
+        scause, stval, user_pc);
 }
 \end{verbatim}
 
-Quando uma aplicação em U-Mode tenta executar instruções restritas de controle e status (como \texttt{csrr} ou \texttt{csrw} direcionadas a registradores de supervisor, \texttt{sret} ou \texttt{wfi}), a CPU dispara a exceção de instrução ilegal (\texttt{scause = 2}). Se houver tentativa de escrita ou leitura na memória reservada do kernel, a MMU sinaliza falha de página (\texttt{scause = 13} ou \texttt{15}). Em ambos os casos, o kernel captura o evento, imprime a descrição formal do erro, o endereço da falha (\texttt{sepc}) e o valor de contexto (\texttt{stval}), contendo o sistema em estado seguro sem reboots descontrolados.
-
 \section{Atividades Não Realizadas}
 
-O escopo da Entrega 2 (Trabalhos 06 a 10) foi concluído integralmente. As tarefas subsequentes (como sistema de arquivos virtual, interface expandida de chamadas de sistema POSIX-like e preempção por temporizador) integram o escopo da Entrega 3.
+Diferente da primeira entrega, todas as cinco etapas previstas para a Entrega 2 (Trabalhos 06 a 10) foram concluídas e testadas com sucesso.
+
+Ficaram para a etapa seguinte (Entrega 3) os recursos mais avançados do sistema operacional, como o sistema de arquivos virtual (TarFS), uma biblioteca de chamadas de sistema mais completa no padrão POSIX e o escalonamento preemptivo com interrupções de temporizador.
 
 \section{Resultados e Validação}
 
-O código foi compilado através do Clang/LLD com as opções \texttt{-ffreestanding -nostdlib -O2} e verificado no QEMU (\texttt{run.sh}).
+O código foi compilado com o Clang/LLD para RISC-V 32-bit em modo \textit{freestanding} e testado no QEMU via script \texttt{run.sh}.
 
+Os testes confirmaram o funcionamento das etapas desenvolvidas:
 \begin{enumerate}
-    \item \textbf{Validação da Alocação de Páginas:} A inspeção dos símbolos via \texttt{llvm-nm} confirmou que \texttt{\_\_free\_ram} foi alocado em \texttt{0x80231000} e \texttt{\_\_free\_ram\_end} em \texttt{0x84231000}, respeitando o alinhamento de 4~KB e a extensão de 64~MB. A chamada de teste em \texttt{kernel\_main} gerou a saída serial esperada:
+    \item \textbf{Alocação de Memória Física:} Na inicialização, a chamada de teste de \texttt{alloc\_pages} no \texttt{kernel\_main} confirmou o avanço sequencial dos blocos:
 \begin{verbatim}
 alloc_pages test: paddr0=80231000
 alloc_pages test: paddr1=80233000
 \end{verbatim}
-    O endereço \texttt{paddr0} coincide com a base da memória livre, e \texttt{paddr1} situa-se exatamente 8192 bytes (2 páginas) à frente, confirmando a ausência de sobreposição.
+    O endereço \texttt{paddr0} inicia em \texttt{\_\_free\_ram} (alinhado a 4~KB) e \texttt{paddr1} avança exatamente duas páginas (8192 bytes), confirmando que a alocação é contínua e sem sobreposição.
 
-    \item \textbf{Validação da Troca de Contexto e Escalonamento:} Foram criados dois processos concorrentes (\texttt{proc\_a} e \texttt{proc\_b}) que emitem repetidamente os caracteres \texttt{'A'} e \texttt{'B'}, cedendo a CPU voluntariamente via \texttt{yield}:
+    \item \textbf{Troca de Contexto e Escalonamento:} Foram criados dois processos cooperativos no kernel emitindo caracteres alternados e cedendo a CPU voluntariamente via \texttt{yield}:
 \begin{verbatim}
 starting process A
 Astarting process B
 BABABABABABABABABABABABABABABABABABABABABABABABABABABABA...
 \end{verbatim}
-    A saída confirma que a alternância de fluxo ocorre de forma contínua e determinística, preservando o estado interno dos registradores e os ponteiros de pilha individuais de cada tarefa.
+    A saída comprovou que a troca de contexto preserva os registradores e a pilha privativa de cada tarefa.
 
-    \item \textbf{Validação da Paginação Sv32 e MMU:} A ativação da MMU e a integridade das tabelas foram comprovadas diretamente pelo monitor do QEMU:
-    \begin{itemize}
-        \item O comando \texttt{info registers} confirmou o registrador \texttt{satp = 80080246}, demonstrando que o bit 31 (\texttt{SATP\_SV32}) está ativo e que o PPN raiz aponta para o endereço físico correspondente da tabela de primeiro nível alocada.
-        \item O comando \texttt{info mem} confirmou o mapeamento identidade integral do kernel de \texttt{0x80200000} até \texttt{0x84231000} com atributos de permissão \texttt{rwx}.
-        \item A execução contínua dos processos sob paginação ativa ocorreu sem geração de falhas espúrias. Ademais, eventuais acessos inválidos a regiões não mapeadas são interceptados pelo tratador de interrupções (\texttt{handle\_trap}) via \texttt{stvec}, emitindo um pânico controlado sem reiniciar o processador.
-    \end{itemize}
+    \item \textbf{Paginação Sv32 e MMU:} Pelo monitor do QEMU (\texttt{Ctrl+A C}), o comando \texttt{info registers} confirmou \texttt{satp = 80080246}, comprovando que o modo Sv32 está ativo com a tabela raiz do processo atual. O comando \texttt{info mem} confirmou o mapeamento identidade do kernel de \texttt{0x80200000} até \texttt{0x84231000} com permissões \texttt{rwx}.
 
-    \item \textbf{Validação das Aplicações de Usuário e Embutimento de Binário:} A cadeia de construção automatizada gerou o binário plano \texttt{shell.bin} (66.256 bytes) e o vinculou ao kernel através de \texttt{shell.bin.o}. No QEMU, a inspeção via monitor confirmou o mapeamento correto da faixa \texttt{0x01000000} com atributos de usuário (\texttt{rwxu}) sobre a memória física alocada.
-    
-    A execução serial comprovou o chaveamento de contexto, a transição para a rotina de usuário e a saída contínua do shell:
+    \item \textbf{Aplicação de Usuário e Binário Embutido:} O binário \texttt{shell.bin} (66.256 bytes) foi embutido no kernel via \texttt{shell.bin.o}. No boot, o processo foi carregado em \texttt{USER\_BASE} (\texttt{0x1000000}) e executou em U-Mode:
 \begin{verbatim}
 shell_bin size = 66256
 shell_bin[0] = 37
@@ -417,29 +304,27 @@ Hello World from user application (shell)!
 [shell] application is running...
 [shell] application is running...
 \end{verbatim}
-    A recepção regular das mensagens comprovou que a chamada \texttt{ecall} oriunda da aplicação de usuário foi interceptada com sucesso pelo tratador do kernel (\texttt{scause = 8}), confirmando a integração ponta a ponta do runtime e do tratador de interrupções.
+    A recepção contínua das mensagens confirmou a execução do código de usuário e o tratamento das chamadas \texttt{ecall} pelo kernel (\texttt{scause = 8}).
 
-    \item \textbf{Validação do Modo Usuário e Isolamento de Privilégios:} A eficácia da separação de privilégios foi comprovada através de testes dedicados em ambiente emulado:
+    \item \textbf{Isolamento de Privilégios e Exceções:} A proteção de hardware foi validada através de dois testes intencionais:
     \begin{itemize}
-        \item \textit{Transição e Execução em U-Mode:} O boot do kernel e o chaveamento com \texttt{sret} posicionaram a execução no endereço \texttt{0x01000000}, com a aplicação shell emitindo mensagens contínuas no terminal serial via \texttt{ecall}.
-        \item \textit{Contenção de Instrução Privilegiada:} Ao injetar a instrução \texttt{csrr t0, sstatus} na aplicação de usuário, o hardware rejeitou a operação e gerou a exceção de instrução ilegal:
+        \item \textit{Instrução Privilegiada:} A execução de \texttt{csrr t0, sstatus} a partir do código de usuário foi barrada pelo hardware, disparando a exceção de instrução ilegal:
 \begin{verbatim}
 Trap: illegal instruction (scause=00000002, stval=100022f3, sepc=0100001c)
-PANIC: kernel.c:93: unexpected trap scause=00000002, stval=100022f3, sepc=0100001c
+PANIC: kernel.c:92: unexpected trap scause=00000002, stval=100022f3, sepc=0100001c
 \end{verbatim}
-        O valor de \texttt{stval} capturou o opcode da instrução inválida e o \texttt{sepc} apontou com precisão para a instrução na aplicação.
-        \item \textit{Contenção de Acesso à Memória do Kernel:} Ao forçar uma gravação no endereço de kernel \texttt{0x80200000} a partir do código de usuário, a MMU bloqueou o acesso devido à ausência do bit \texttt{PAGE\_U}, disparando a falha de página controlada:
+        \item \textit{Acesso à Memória do Kernel:} A tentativa de escrita no endereço \texttt{0x80200000} a partir de U-Mode violou as permissões da MMU, gerando falta de página:
 \begin{verbatim}
 Trap: store/amo page fault (scause=0000000f, stval=80200000, sepc=01000026)
-PANIC: kernel.c:93: unexpected trap scause=0000000f, stval=80200000, sepc=01000026
+PANIC: kernel.c:92: unexpected trap scause=0000000f, stval=80200000, sepc=01000026
 \end{verbatim}
     \end{itemize}
-    Ambos os cenários comprovaram a robustez do isolamento de hardware e a clareza do diagnóstico emitido pelo kernel.
+    Ambos os cenários comprovaram que acessos indevidos interrompem o sistema de forma controlada através de \texttt{PANIC}, exibindo as causas e registradores com clareza.
 \end{enumerate}
 
 \section{Conclusão}
 
-As atividades desenvolvidas nesta segunda etapa dotaram o kernel de recursos fundamentais de infraestrutura de sistemas operacionais: alocação dinâmica de memória física por páginas alinhadas, concorrência cooperativa de processos com pilhas dedicadas, gerenciamento de memória virtual paginada sob a arquitetura Sv32 do RISC-V, embutimento e execução de binários independentes no espaço de usuário com runtime próprio, e isolamento formal de privilégios de CPU em modo usuário (U-Mode) com diagnóstico controlado de exceções. O kernel encontra-se preparado para o desenvolvimento da terceira etapa, com foco em chamadas de sistema estruturadas e sistema de arquivos.
+Nesta segunda etapa, o kernel evoluiu com a implementação de alocação de memória física por páginas, gerenciamento de múltiplos processos com troca de contexto cooperativa, memória virtual com paginação Sv32 e a execução de aplicações independentes em Modo Usuário com isolamento por hardware e tratamento de exceções. Todas as etapas previstas foram concluídas e testadas no QEMU, deixando o sistema preparado para receber o sistema de arquivos e as chamadas de sistema na Entrega 3.
 
 \begin{thebibliography}{9}
 \bibitem{nuta2023}
