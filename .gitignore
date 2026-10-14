@@ -10,6 +10,9 @@ build/
 *.tar
 *.zip
 
+# Documentação e Relatórios Acadêmicos (Uso Local)
+docs/
+
 # Arquivos temporários e de compilação do LaTeX
 *.aux
 *.log
@@ -23,3 +26,9 @@ build/
 *.synctex.gz
 *.fdb_latexmk
 *.fls
+
+# IDEs e Ferramentas
+.vscode/
+.idea/
+compile_commands.json
+.DS_Store
